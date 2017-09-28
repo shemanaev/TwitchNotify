@@ -1,20 +1,47 @@
 #define INITGUID
 #define COBJMACROS
 
-#pragma warning (disable : 4204 4711 4710 4820)
-#pragma warning (push, 0)
+#if defined(__GNUC__)
+// NOTE(bk):  Needed for gcc.  msvc seems to set these values based off the current OS.
+#  define NTDDI_VERSION   0x06010000  // Windows 7 though technically could support Vista
+#  define WINVER          0x061
+#  define _WIN32_WINNT    0x061
+#  define _WIN32_DCOM
+#elif defined(_MSC_VER)
+#  pragma warning (disable : 4204 4711 4710 4820)
+#  pragma warning (push, 0)
+#endif
 
 #include <windows.h>
+#include <shlwapi.h>
 #include <strsafe.h>
 #include <shlobj.h>
-#include <shlwapi.h>
 #include <wininet.h>
 #include <wincodec.h>
 
-#include "jsmn.c" // https://github.com/zserge/jsmn
-#include "jsmn_iterator.c" // https://github.com/zserge/jsmn/pull/69
+#if defined(__GNUC__)
+#  pragma GCC diagnostic push
+// TODO(bk):  Do I need multiple push/pop?
+// TODO(bk):  I should see about fixing the warnings and submitting a push request.
+#  pragma GCC diagnostic ignored "-Wtype-limits"
+#  pragma GCC diagnostic ignored "-Wsign-compare"
+#endif
 
-#pragma warning (pop)
+
+#include "jsmn.c"               // https://github.com/zserge/jsmn
+#include "jsmn_iterator.c"      // https://github.com/zserge/jsmn/pull/69
+
+#if defined(_MSC_VER)
+#  pragma warning(pop)
+#elif defined(__GNUC__)
+#  pragma GCC diagnostic pop
+#endif
+
+#ifdef _MSC_VER
+#define NORETURN_FUNCTION __declspec(noreturn)
+#else
+#define NORETURN_FUNCTION __attribute__((noreturn))
+#endif
 
 // TODO
 // automatic check for updates https://api.github.com/repos/mmozeiko/TwitchNotify/git/refs/heads/master
@@ -110,7 +137,9 @@ static WCHAR gExeFolder[MAX_PATH + 1];
 
 static UINT WM_TASKBARCREATED;
 
-#pragma function ("memset")
+#if defined(_MSC_VER)
+#  pragma function ("memset")
+#endif
 void* memset(void* dst, int value, size_t count)
 {
     __stosb((BYTE*)dst, (BYTE)value, count);
@@ -467,7 +496,7 @@ static LRESULT CALLBACK WindowProc(HWND window, UINT msg, WPARAM wparam, LPARAM 
         
         case WM_TWITCH_NOTIFY_ADD_USER:
         {
-            if (gUserCount < _countof(gUsers))
+            if (gUserCount < (int)_countof(gUsers))
             {
                 struct User* user = gUsers + gUserCount++;
                 StrCpyNW(user->name, (PCWSTR)wparam, _countof(user->name));
@@ -755,14 +784,14 @@ static HICON DecodeIconAndSaveToCache(UINT64 hash, void* data, DWORD length)
                                     WICBitmapInterpolationModeCubic);
                                 if (SUCCEEDED(hr))
                                 {
-                                    hr = IWICBitmapScaler_QueryInterface(scaler, &IID_IWICBitmapSource, &source);
+                                    hr = IWICBitmapScaler_QueryInterface(scaler, &IID_IWICBitmapSource, (void**)&source);
                                 }
                                 IWICBitmapScaler_Release(scaler);
                             }
                         }
                         else
                         {
-                            hr = IWICBitmapScaler_QueryInterface(bitmap, &IID_IWICBitmapSource, &source);
+                            hr = IWICBitmapScaler_QueryInterface(bitmap, &IID_IWICBitmapSource, (void**)&source);
                         }
 
                         if (SUCCEEDED(hr))
@@ -1205,7 +1234,7 @@ static void ReloadUsers(void)
     }
 }
 
-static DWORD UpdateThread(LPVOID arg)
+static DWORD NORETURN_FUNCTION UpdateThread(LPVOID arg)
 {
     (void)arg;
 
@@ -1226,7 +1255,7 @@ static DWORD UpdateThread(LPVOID arg)
     }
 }
 
-static DWORD ConfigThread(LPVOID arg)
+static DWORD NORETURN_FUNCTION ConfigThread(LPVOID arg)
 {
     (void)arg;
 
@@ -1280,7 +1309,7 @@ static void SetupWIC(void)
     HRESULT hr = CoInitializeEx(NULL, COINIT_MULTITHREADED);
     Assert(SUCCEEDED(hr));
 
-    hr = CoCreateInstance(&CLSID_WICImagingFactory, NULL, CLSCTX_INPROC_SERVER, &IID_IWICImagingFactory, &gWicFactory);
+    hr = CoCreateInstance(&CLSID_WICImagingFactory, NULL, CLSCTX_INPROC_SERVER, &IID_IWICImagingFactory, (LPVOID*)&gWicFactory);
     Assert(SUCCEEDED(hr));
 }
 
