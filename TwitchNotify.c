@@ -96,9 +96,11 @@
 
 #define CHECK_USERS_TIMER_INTERVAL 60 // seconds
 #define RELOAD_CONFIG_TIMER_DELAY 100 // msec
+#define SKIP_ERRORS_TIMER_INTERVAL (CHECK_USERS_TIMER_INTERVAL / 2)
 
 #define UPDATE_USERS_TIMER_ID  1
 #define RELOAD_CONFIG_TIMER_ID 2
+#define SKIP_ERRORS_TIMER_ID   3
 
 #define MAX_ICON_CACHE_AGE (60*60*24*7) // 1 week
 
@@ -123,6 +125,7 @@ static int gYdlFormat;
 static int gUseLivestreamer;
 static int gActive;
 static int gLastPopupUserIndex = -1;
+static BOOL gHideErrors;
 
 static HANDLE gHeap;
 static HICON gTwitchNotifyIcon;
@@ -139,12 +142,12 @@ static UINT WM_TASKBARCREATED;
 
 #if defined(_MSC_VER)
 #  pragma function ("memset")
-#endif
 void* memset(void* dst, int value, size_t count)
 {
     __stosb((BYTE*)dst, (BYTE)value, count);
     return dst;
 }
+#endif
 
 static void ShowNotification(LPWSTR message, LPWSTR title, DWORD flags, HICON icon)
 {
@@ -365,6 +368,9 @@ static LRESULT CALLBACK WindowProc(HWND window, UINT msg, WPARAM wparam, LPARAM 
             {
                 if (gActive)
                 {
+                    gHideErrors = TRUE;
+                    SetTimer(window, SKIP_ERRORS_TIMER_ID, SKIP_ERRORS_TIMER_INTERVAL * 1000, NULL);
+                    
                     ToggleActive(window);
                     ToggleActive(window);
                 }
@@ -576,6 +582,11 @@ static LRESULT CALLBACK WindowProc(HWND window, UINT msg, WPARAM wparam, LPARAM 
             {
                 SetEvent(gConfigEvent);
                 KillTimer(window, RELOAD_CONFIG_TIMER_ID);
+            }
+            else if (wparam == SKIP_ERRORS_TIMER_ID)
+            {
+                gHideErrors = FALSE;
+                KillTimer(window, SKIP_ERRORS_TIMER_ID);
             }
             return 0;
         }
@@ -888,7 +899,7 @@ static int jsoneq(const char* json, jsmntok_t* token, const char* str)
     return length == 0;
 }
 
-static int ConverJsonStringToW(char* src, int length, WCHAR* dst, int dstLength)
+static int ConvertJsonStringToW(char* src, int length, WCHAR* dst, int dstLength)
 {
     char* read = src;
     char* write = src;
@@ -1022,7 +1033,10 @@ static int UpdateUsers(void)
     WCHAR* headers = L"Client-ID: jzkbprff40iqj646a697cyrvl0zt2m6\r\n\r\n";
     if (!DownloadURL(url, headers, data, &dataLength))
     {
-        SendMessageW(gWindow, WM_TWITCH_NOTIFY_UPDATE_ERROR, (WPARAM)L"Failed to connect to Twitch!", 0);
+        if (!gHideErrors)
+        {
+            SendMessageW(gWindow, WM_TWITCH_NOTIFY_UPDATE_ERROR, (WPARAM)L"Failed to connect to Twitch!", 0);
+        }
         result = 0;
     }
     else
@@ -1101,14 +1115,14 @@ static int UpdateUsers(void)
                     {
                         char* str = data + value->start;
                         int length = value->end - value->start;
-                        ConverJsonStringToW(str, length, status.user, _countof(status.user));
+                        ConvertJsonStringToW(str, length, status.user, _countof(status.user));
                     }
                     else if (jsoneq(data, id, "logo") && value->type == JSMN_STRING)
                     {
                         char* str = data + value->start;
                         int length = value->end - value->start;
 
-                        int urlLength = ConverJsonStringToW(str, length, url, _countof(url));
+                        int urlLength = ConvertJsonStringToW(str, length, url, _countof(url));
                         status.icon = GetUserIcon(url, urlLength, data + MAX_DOWNLOAD_SIZE);
                     }
                 }
@@ -1118,7 +1132,7 @@ static int UpdateUsers(void)
                     {
                         char* str = data + value->start;
                         int length = value->end - value->start;
-                        ConverJsonStringToW(str, length, status.game, _countof(status.game));
+                        ConvertJsonStringToW(str, length, status.game, _countof(status.game));
                     }
                     else if (jsoneq(data, id, "channel") && value->type == JSMN_OBJECT)
                     {
@@ -1144,7 +1158,7 @@ static int UpdateUsers(void)
                         WCHAR message[256];
                         char* str = data + value->start;
                         int length = value->end - value->start;
-                        ConverJsonStringToW(str, length, message, _countof(message));
+                        ConvertJsonStringToW(str, length, message, _countof(message));
                         SendMessage(gWindow, WM_TWITCH_NOTIFY_UPDATE_ERROR, (WPARAM)message,
                             (LPARAM)L"Error from Twitch!");
                         result = 0;
