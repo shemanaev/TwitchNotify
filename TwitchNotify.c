@@ -107,12 +107,13 @@
 struct User
 {
     WCHAR name[MAX_USER_NAME_LENGTH];
+    WCHAR game[MAX_GAME_NAME_LENGTH];
     int online;
 };
 
 struct UserStatusOnline
 {
-    WCHAR user[MAX_GAME_NAME_LENGTH];
+    WCHAR user[MAX_USER_NAME_LENGTH];
     WCHAR game[MAX_GAME_NAME_LENGTH];
     HICON icon;
 };
@@ -405,7 +406,37 @@ static LRESULT CALLBACK WindowProc(HWND window, UINT msg, WPARAM wparam, LPARAM 
 
                 for (int i = 0; i < gUserCount; i++)
                 {
-                    AppendMenuW(users, gUsers[i].online ? MF_CHECKED : MF_STRING, (i + 1) << 8, gUsers[i].name);
+                    struct User user = gUsers[i];
+                    if (user.online)
+                    {
+                        // TODO(bk):  Play around with the size of the buffer.  If the game
+                        //            length is the max length, the menu will expand for the
+                        //            full length.  It looks weird.  Is this what is wanted?
+                        WCHAR game[MAX_GAME_NAME_LENGTH];
+                        int result;
+
+                        if (user.game[0] == '\0')
+                        {
+                            result = SUCCEEDED(StringCbCopyW(game, _countof(game),
+                                               L"    Playing unknown game")) ? 1 : 0;
+                        }
+                        else
+                        {
+                            result = wnsprintfW(game, _countof(game),
+                                               L"    Playing: %s", user.game);
+                        }
+                        Assert(result > 0 && result < MAX_GAME_NAME_LENGTH);
+
+                        AppendMenuW(users, MF_CHECKED, (i + 1) << 8, user.name);
+                        if (result)
+                        {
+                            AppendMenuW(users, MF_GRAYED, 0, game);
+                        }
+                    }
+                    else
+                    {
+                        AppendMenuW(users, MF_STRING, (i + 1) << 8, user.name);
+                    }
                 }
 
                 HMENU menu = CreatePopupMenu();
@@ -534,6 +565,7 @@ static LRESULT CALLBACK WindowProc(HWND window, UINT msg, WPARAM wparam, LPARAM 
                         gLastPopupUserIndex = i;
                         ShowUserOnlineNotification(status);
                     }
+                    StringCbCopyW(user->game, _countof(user->game), status->game);
                     user->online = 1;
                     break;
                 }
