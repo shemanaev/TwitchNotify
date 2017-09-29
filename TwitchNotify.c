@@ -13,6 +13,7 @@
 #endif
 
 #include <windows.h>
+#include <DbgHelp.h>
 #include <shlwapi.h>
 #include <strsafe.h>
 #include <shlobj.h>
@@ -1359,8 +1360,67 @@ static void SetupWIC(void)
     Assert(SUCCEEDED(hr));
 }
 
+static LONG WINAPI UnhandledException(LPEXCEPTION_POINTERS exceptionInfo)
+{
+    char dmpFilePath[MAX_PATH];
+    HANDLE dmpFile = NULL;
+    char message[MAX_PATH + 255];
+    char title[255];
+
+    SYSTEMTIME time = {0};
+    GetSystemTime(&time);
+
+    wnsprintfA(dmpFilePath, _countof(dmpFilePath), "CrashDump_%s_%d_%d_%d_%d_%d_%d.dmp",
+        "TwitchNotify",     // TODO(bk):  Have this be a define
+        time.wYear, time.wMonth, time.wDay,
+        time.wHour, time.wMinute, time.wSecond);
+
+    dmpFile = CreateFileA(dmpFilePath,
+                           GENERIC_WRITE,
+                           0,
+                           NULL,
+                           CREATE_ALWAYS,
+                           0,
+                           NULL);
+
+    Assert(dmpFile);
+    if (dmpFile)
+    {
+        MINIDUMP_EXCEPTION_INFORMATION MiniInfo =
+        {
+            GetCurrentThreadId(),
+            exceptionInfo,
+            TRUE
+        };
+
+        MiniDumpWriteDump(
+            GetCurrentProcess(),
+            GetCurrentProcessId(),
+            dmpFile,
+            MiniDumpWithIndirectlyReferencedMemory,
+            &MiniInfo,
+            NULL,
+            NULL);
+
+        CloseHandle(dmpFile);
+    }
+
+    wnsprintfA(message, _countof(message),
+               "An unhandled exception was found in %s.  Please investigate.\nDump file created:%s",
+               TWITCH_NOTIFY_TITLE,
+               dmpFilePath);
+    wnsprintfA(title, _countof(title), "%s - Error!", TWITCH_NOTIFY_TITLE);
+
+    MessageBoxA(NULL, message, title, MB_YESNO | MB_ICONEXCLAMATION);
+
+    return EXCEPTION_EXECUTE_HANDLER;
+}
+
+
 void WinMainCRTStartup(void)
 {
+    SetUnhandledExceptionFilter(UnhandledException);
+
     WNDCLASSEXW wc =
     {
         .cbSize = sizeof(wc),
