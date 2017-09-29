@@ -1362,20 +1362,20 @@ static void SetupWIC(void)
 
 static LONG WINAPI UnhandledException(LPEXCEPTION_POINTERS exceptionInfo)
 {
-    char dmpFilePath[MAX_PATH];
+    WCHAR dmpFilePath[MAX_PATH];
     HANDLE dmpFile = NULL;
-    char message[MAX_PATH + 255];
-    char title[255];
+    WCHAR message[MAX_PATH + 255];
+    WCHAR title[255];
 
     SYSTEMTIME time = {0};
     GetSystemTime(&time);
 
-    wnsprintfA(dmpFilePath, _countof(dmpFilePath), "CrashDump_%s_%d_%d_%d_%d_%d_%d.dmp",
-        "TwitchNotify",     // TODO(bk):  Have this be a define
+    wnsprintfW(dmpFilePath, _countof(dmpFilePath), L"CrashDump_%s_%d_%d_%d_%d_%d_%d.dmp",
+        L"TwitchNotify",     // TODO(bk):  Have this be a define
         time.wYear, time.wMonth, time.wDay,
         time.wHour, time.wMinute, time.wSecond);
 
-    dmpFile = CreateFileA(dmpFilePath,
+    dmpFile = CreateFileW(dmpFilePath,
                            GENERIC_WRITE,
                            0,
                            NULL,
@@ -1405,13 +1405,13 @@ static LONG WINAPI UnhandledException(LPEXCEPTION_POINTERS exceptionInfo)
         CloseHandle(dmpFile);
     }
 
-    wnsprintfA(message, _countof(message),
-               "An unhandled exception was found in %s.  Please investigate.\nDump file created:%s",
+    wnsprintfW(message, _countof(message),
+               L"An unhandled exception was found in %s.  Please investigate.\nDump file created:%s",
                TWITCH_NOTIFY_TITLE,
                dmpFilePath);
-    wnsprintfA(title, _countof(title), "%s - Error!", TWITCH_NOTIFY_TITLE);
+    wnsprintfW(title, _countof(title), L"%s - Error!", TWITCH_NOTIFY_TITLE);
 
-    MessageBoxA(NULL, message, title, MB_YESNO | MB_ICONEXCLAMATION);
+    MessageBoxW(NULL, message, title, MB_OK | MB_ICONEXCLAMATION);
 
     return EXCEPTION_EXECUTE_HANDLER;
 }
