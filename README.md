@@ -19,11 +19,11 @@ To use [mpv](https://mpv.io/) with [youtube-dl](https://rg3.github.io/youtube-dl
 
 # Download
 
-You can get newest release as zip archive here: [TwitchNotify.zip](https://raw.githubusercontent.com/wiki/mmozeiko/TwitchNotify/TwitchNotify.zip)
+You can get newest release from [Releases](https://github.com/shemanaev/TwitchNotify/releases) page.
 
 # Building
 
-* Install [Visual Studio 2015](https://www.visualstudio.com/en-us/products/vs-2015-product-editions.aspx)
+* Install [Visual Studio 2017](https://www.visualstudio.com/downloads/)
 * Run `build.cmd`
 * TwitchNotify uses [jsmn](http://zserge.com/jsmn.html) JSON parsing library (MIT license)
 
