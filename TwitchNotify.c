@@ -158,7 +158,7 @@ static void ShowNotification(LPWSTR message, LPWSTR title, DWORD flags, HICON ic
         .cbSize = sizeof(data),
         .hWnd = gWindow,
         .uFlags = NIF_INFO,
-        .dwInfoFlags = flags | (icon ? NIIF_LARGE_ICON : 0),
+        .dwInfoFlags = flags | NIIF_NOSOUND | (icon ? NIIF_LARGE_ICON : 0),
         .hBalloonIcon = icon,
     };
     StrCpyNW(data.szInfo, message, _countof(data.szInfo));
