@@ -1281,7 +1281,7 @@ static void ReloadUsers(void)
     }
 }
 
-static DWORD NORETURN_FUNCTION UpdateThread(LPVOID arg)
+static DWORD WINAPI UpdateThread(LPVOID arg)
 {
     (void)arg;
 
@@ -1302,7 +1302,7 @@ static DWORD NORETURN_FUNCTION UpdateThread(LPVOID arg)
     }
 }
 
-static DWORD NORETURN_FUNCTION ConfigThread(LPVOID arg)
+static DWORD WINAPI ConfigThread(LPVOID arg)
 {
     (void)arg;
 
