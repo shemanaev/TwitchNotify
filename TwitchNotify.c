@@ -91,6 +91,7 @@
 #define MAX_USER_COUNT        100 // max user count that can be requested in one Twitch API call
 #define MAX_USER_NAME_LENGTH  256
 #define MAX_GAME_NAME_LENGTH  128
+#define MAX_STATUS_LENGTH     128
 #define MAX_WINDOWS_ICON_SIZE 256
 
 #define MAX_DOWNLOAD_SIZE (1024 * 1024) // 1 MiB
@@ -109,6 +110,8 @@ struct User
 {
     WCHAR name[MAX_USER_NAME_LENGTH];
     WCHAR game[MAX_GAME_NAME_LENGTH];
+    int video_height;
+    int fps;
     int online;
 };
 
@@ -116,7 +119,10 @@ struct UserStatusOnline
 {
     WCHAR user[MAX_USER_NAME_LENGTH];
     WCHAR game[MAX_GAME_NAME_LENGTH];
+    WCHAR status[MAX_STATUS_LENGTH];
     HICON icon;
+    int video_height;
+    int fps;
 };
 
 static struct User gUsers[MAX_USER_COUNT];
@@ -170,24 +176,13 @@ static void ShowNotification(LPWSTR message, LPWSTR title, DWORD flags, HICON ic
 
 static void ShowUserOnlineNotification(struct UserStatusOnline* status)
 {
-    WCHAR title[1024];
-    wnsprintfW(title, _countof(title), L"'%s' just went live!", status->user);
-
     WCHAR message[1024];
+    wnsprintfW(message, _countof(message), L"%s\n%s", status->status, status->game[0] == 0 ? L"unknown game" : status->game);
 
-    if (status->game[0] == 0)
-    {
-        StrCpyNW(message, L"Playing unknown game", _countof(message));
-    }
-    else
-    {
-        wnsprintfW(message, _countof(message), L"Playing '%s'", status->game);
-    }
-
-    ShowNotification(message, title, NIIF_USER, status->icon ? status->icon : gTwitchNotifyIcon);
+    ShowNotification(message, status->user, NIIF_USER, status->icon ? status->icon : gTwitchNotifyIcon);
 }
 
-static void OpenTwitchUser(int index)
+static void OpenTwitchUser(int index, int quality)
 {
     if (index < 0 || index >= gUserCount)
     {
@@ -207,9 +202,15 @@ static void OpenTwitchUser(int index)
         }
         else if (gUseMpvYdl)
         {
-            static const WCHAR* formats[] = { L"Source", L"High", L"Medium", L"Low", L"Mobile" };
+            static const WCHAR* formats[] = {
+                L"best",
+                L"\"bestvideo[height<=720]+bestaudio/best[height<=720]\"",
+                L"\"bestvideo[height<=480]+bestaudio/best[height<=480]\"",
+                L"\"bestvideo[height<=360]+bestaudio/best[height<=360]\"",
+                L"\"bestvideo[height<=160]+bestaudio/best[height<=160]\""
+            };
             StrCatBuffW(args, L" --ytdl-format ", _countof(args));
-            StrCatBuffW(args, formats[gYdlFormat], _countof(args));
+            StrCatBuffW(args, formats[quality == 0 ? gYdlFormat : quality - 1], _countof(args));
             ShellExecuteW(NULL, L"open", L"mpv.exe", args, NULL, SW_HIDE);
             return;
         }
@@ -372,7 +373,7 @@ static LRESULT CALLBACK WindowProc(HWND window, UINT msg, WPARAM wparam, LPARAM 
                 {
                     gHideErrors = TRUE;
                     SetTimer(window, SKIP_ERRORS_TIMER_ID, SKIP_ERRORS_TIMER_INTERVAL * 1000, NULL);
-                    
+
                     ToggleActive(window);
                     ToggleActive(window);
                 }
@@ -382,16 +383,70 @@ static LRESULT CALLBACK WindowProc(HWND window, UINT msg, WPARAM wparam, LPARAM 
 
         case WM_TWITCH_NOTIFY_COMMAND:
         {
-            if (lparam == WM_RBUTTONUP)
+            if (lparam == WM_LBUTTONUP)
+            {
+                HMENU users = CreatePopupMenu();
+                Assert(users);
+
+                for (int i = 0; i < gUserCount; i++)
+                {
+                    struct User user = gUsers[i];
+
+                    if (user.online)
+                    {
+                        HMENU qualities = CreatePopupMenu();
+                        Assert(qualities);
+
+                        WCHAR source[128];
+                        if (user.fps > 30) {
+                            wnsprintfW(source, _countof(source), L"Source\t(%dp%d)", user.video_height, user.fps);
+                        }
+                        else
+                        {
+                            wnsprintfW(source, _countof(source), L"Source\t(%dp)", user.video_height);
+                        }
+
+                        AppendMenuW(qualities, MF_STRING, ((i + 1) << 8) + 1, source);
+                        AppendMenuW(qualities, MF_STRING, ((i + 1) << 8) + 2, L"High\t(720p)");
+                        AppendMenuW(qualities, MF_STRING, ((i + 1) << 8) + 3, L"Medium\t(480p)");
+                        AppendMenuW(qualities, MF_STRING, ((i + 1) << 8) + 4, L"Low\t(360p)");
+                        AppendMenuW(qualities, MF_STRING, ((i + 1) << 8) + 5, L"Mobile\t(160p)");
+
+                        AppendMenuW(qualities, MF_SEPARATOR, 0, NULL);
+                        AppendMenuW(qualities, MF_GRAYED, 0, user.game[0] == '\0' ? L"unknown game" : user.game);
+
+                        AppendMenuW(users, MF_POPUP | MF_CHECKED, (UINT_PTR)qualities, user.name);
+                    }
+                    else
+                    {
+                        AppendMenuW(users, MF_STRING, (i + 1) << 8, user.name);
+                    }
+                }
+
+                if (gUserCount == 0)
+                {
+                    AppendMenuW(users, MF_GRAYED, 0, L"No users found");
+                }
+
+                POINT mouse;
+                GetCursorPos(&mouse);
+
+                SetForegroundWindow(window);
+                int cmd = TrackPopupMenu(users, TPM_RETURNCMD | TPM_NONOTIFY, mouse.x, mouse.y, 0, window, NULL);
+                OpenTwitchUser((cmd >> 8) - 1, cmd & 0xff);
+
+                DestroyMenu(users);
+            }
+            else if (lparam == WM_RBUTTONUP)
             {
                 HMENU mpvYdl = CreatePopupMenu();
                 Assert(mpvYdl);
 
                 AppendMenuW(mpvYdl, gYdlFormat == 0 ? MF_CHECKED : MF_UNCHECKED, CMD_YDL_FORMAT_SOURCE, L"Source");
-                AppendMenuW(mpvYdl, gYdlFormat == 1 ? MF_CHECKED : MF_UNCHECKED, CMD_YDL_FORMAT_HIGH, L"High (1280x720)");
-                AppendMenuW(mpvYdl, gYdlFormat == 2 ? MF_CHECKED : MF_UNCHECKED, CMD_YDL_FORMAT_MEDIUM, L"Medium (852x480)");
-                AppendMenuW(mpvYdl, gYdlFormat == 3 ? MF_CHECKED : MF_UNCHECKED, CMD_YDL_FORMAT_LOW, L"Low (640x360)");
-                AppendMenuW(mpvYdl, gYdlFormat == 4 ? MF_CHECKED : MF_UNCHECKED, CMD_YDL_FORMAT_MOBILE, L"Mobile (400x226)");
+                AppendMenuW(mpvYdl, gYdlFormat == 1 ? MF_CHECKED : MF_UNCHECKED, CMD_YDL_FORMAT_HIGH, L"High\t(720p)");
+                AppendMenuW(mpvYdl, gYdlFormat == 2 ? MF_CHECKED : MF_UNCHECKED, CMD_YDL_FORMAT_MEDIUM, L"Medium\t(480p)");
+                AppendMenuW(mpvYdl, gYdlFormat == 3 ? MF_CHECKED : MF_UNCHECKED, CMD_YDL_FORMAT_LOW, L"Low\t(360p)");
+                AppendMenuW(mpvYdl, gYdlFormat == 4 ? MF_CHECKED : MF_UNCHECKED, CMD_YDL_FORMAT_MOBILE, L"Mobile\t(160p)");
 
                 HMENU settings = CreatePopupMenu();
                 Assert(settings);
@@ -401,44 +456,6 @@ static LRESULT CALLBACK WindowProc(HWND window, UINT msg, WPARAM wparam, LPARAM 
                 AppendMenuW(settings, MF_SEPARATOR, 0, NULL);
                 AppendMenuW(settings, gUseMpvYdl ? MF_CHECKED : MF_UNCHECKED, CMD_USE_MPV_YDL, L"Use mpv && youtube-dl");
                 AppendMenuW(settings, (gUseMpvYdl ? 0 : MF_GRAYED) | MF_POPUP, (UINT_PTR)mpvYdl, L"youtube-dl format");
-
-                HMENU users = CreatePopupMenu();
-                Assert(users);
-
-                for (int i = 0; i < gUserCount; i++)
-                {
-                    struct User user = gUsers[i];
-                    if (user.online)
-                    {
-                        // TODO(bk):  Play around with the size of the buffer.  If the game
-                        //            length is the max length, the menu will expand for the
-                        //            full length.  It looks weird.  Is this what is wanted?
-                        WCHAR game[MAX_GAME_NAME_LENGTH];
-                        int result;
-
-                        if (user.game[0] == '\0')
-                        {
-                            result = SUCCEEDED(StringCbCopyW(game, _countof(game),
-                                               L"    Playing unknown game")) ? 1 : 0;
-                        }
-                        else
-                        {
-                            result = wnsprintfW(game, _countof(game),
-                                               L"    Playing: %s", user.game);
-                        }
-                        Assert(result > 0 && result < MAX_GAME_NAME_LENGTH);
-
-                        AppendMenuW(users, MF_CHECKED, (i + 1) << 8, user.name);
-                        if (result)
-                        {
-                            AppendMenuW(users, MF_GRAYED, 0, game);
-                        }
-                    }
-                    else
-                    {
-                        AppendMenuW(users, MF_STRING, (i + 1) << 8, user.name);
-                    }
-                }
 
                 HMENU menu = CreatePopupMenu();
                 Assert(menu);
@@ -453,15 +470,6 @@ static LRESULT CALLBACK WindowProc(HWND window, UINT msg, WPARAM wparam, LPARAM 
                 AppendMenuW(menu, MF_POPUP, (UINT_PTR)settings, L"Settings");
 
                 AppendMenuW(menu, MF_STRING, CMD_EDIT_CONFIG_FILE, L"Modify user list");
-
-                if (gUserCount == 0)
-                {
-                    AppendMenuW(menu, MF_GRAYED, 0, L"No users found");
-                }
-                else
-                {
-                    AppendMenuW(menu, MF_POPUP, (UINT_PTR)users, L"Users");
-                }
 
                 AppendMenuW(menu, MF_SEPARATOR, 0, NULL);
                 AppendMenuW(menu, MF_STRING, CMD_QUIT, L"Exit");
@@ -501,13 +509,9 @@ static LRESULT CALLBACK WindowProc(HWND window, UINT msg, WPARAM wparam, LPARAM 
                 case CMD_QUIT:
                     DestroyWindow(window);
                     break;
-                default:
-                    OpenTwitchUser((cmd >> 8) - 1);
-                    break;
                 }
 
                 DestroyMenu(menu);
-                DestroyMenu(users);
                 DestroyMenu(settings);
                 DestroyMenu(mpvYdl);
             }
@@ -515,7 +519,7 @@ static LRESULT CALLBACK WindowProc(HWND window, UINT msg, WPARAM wparam, LPARAM 
             {
                 if (gLastPopupUserIndex != -1)
                 {
-                    OpenTwitchUser(gLastPopupUserIndex);
+                    OpenTwitchUser(gLastPopupUserIndex, 0);
                     gLastPopupUserIndex = -1;
                 }
             }
@@ -531,7 +535,7 @@ static LRESULT CALLBACK WindowProc(HWND window, UINT msg, WPARAM wparam, LPARAM 
             gUserCount = 0;
             return 0;
         }
-        
+
         case WM_TWITCH_NOTIFY_ADD_USER:
         {
             if (gUserCount < (int)_countof(gUsers))
@@ -568,6 +572,8 @@ static LRESULT CALLBACK WindowProc(HWND window, UINT msg, WPARAM wparam, LPARAM 
                     }
                     StringCbCopyW(user->game, _countof(user->game), status->game);
                     user->online = 1;
+                    user->video_height = status->video_height;
+                    user->fps = status->fps;
                     break;
                 }
             }
@@ -1158,6 +1164,13 @@ static int UpdateUsers(void)
                         int urlLength = ConvertJsonStringToW(str, length, url, _countof(url));
                         status.icon = GetUserIcon(url, urlLength, data + MAX_DOWNLOAD_SIZE);
                     }
+                    else if (jsoneq(data, id, "status") && value->type == JSMN_STRING)
+                    {
+                        char* str = data + value->start;
+                        int length = value->end - value->start;
+
+                        ConvertJsonStringToW(str, length, status.status, _countof(status.status));
+                    }
                 }
                 else if (state == STATE_STREAM)
                 {
@@ -1172,6 +1185,28 @@ static int UpdateUsers(void)
                         channel = iter;
                         state = STATE_CHANNEL;
                         jsmn_iterator_init(&iter, tokens, t, (int)(value - tokens));
+                    }
+                    else if (jsoneq(data, id, "video_height") && value->type == JSMN_PRIMITIVE)
+                    {
+                        WCHAR message[256];
+                        char* str = data + value->start;
+                        int length = value->end - value->start;
+                        ConvertJsonStringToW(str, length, message, _countof(message));
+
+                        int temp_value;
+                        Assert(StrToIntExW(message, STIF_DEFAULT, &temp_value));
+                        status.video_height = temp_value;
+                    }
+                    else if (jsoneq(data, id, "average_fps") && value->type == JSMN_PRIMITIVE)
+                    {
+                        WCHAR message[256];
+                        char* str = data + value->start;
+                        int length = 2; //value->end - value->start;
+                        ConvertJsonStringToW(str, length, message, _countof(message));
+
+                        int temp_value;
+                        Assert(StrToIntExW(message, STIF_DEFAULT, &temp_value));
+                        status.fps = temp_value;
                     }
                 }
                 else if (state == STATE_STREAMS && value->type == JSMN_OBJECT)
