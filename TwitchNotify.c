@@ -391,6 +391,31 @@ static LRESULT CALLBACK WindowProc(HWND window, UINT msg, WPARAM wparam, LPARAM 
                 for (int i = 0; i < gUserCount; i++)
                 {
                     struct User user = gUsers[i];
+                    AppendMenuW(users, user.online ? MF_CHECKED : MF_STRING, (i + 1) << 8, user.name);
+                }
+
+                if (gUserCount == 0)
+                {
+                    AppendMenuW(users, MF_GRAYED, 0, L"No users found");
+                }
+
+                POINT mouse;
+                GetCursorPos(&mouse);
+
+                SetForegroundWindow(window);
+                int cmd = TrackPopupMenu(users, TPM_RETURNCMD | TPM_NONOTIFY, mouse.x, mouse.y, 0, window, NULL);
+                OpenTwitchUser((cmd >> 8) - 1, cmd & 0xff);
+
+                DestroyMenu(users);
+            }
+            else if (lparam == WM_RBUTTONUP)
+            {
+                HMENU users = CreatePopupMenu();
+                Assert(users);
+
+                for (int i = 0; i < gUserCount; i++)
+                {
+                    struct User user = gUsers[i];
 
                     if (user.online)
                     {
@@ -423,22 +448,6 @@ static LRESULT CALLBACK WindowProc(HWND window, UINT msg, WPARAM wparam, LPARAM 
                     }
                 }
 
-                if (gUserCount == 0)
-                {
-                    AppendMenuW(users, MF_GRAYED, 0, L"No users found");
-                }
-
-                POINT mouse;
-                GetCursorPos(&mouse);
-
-                SetForegroundWindow(window);
-                int cmd = TrackPopupMenu(users, TPM_RETURNCMD | TPM_NONOTIFY, mouse.x, mouse.y, 0, window, NULL);
-                OpenTwitchUser((cmd >> 8) - 1, cmd & 0xff);
-
-                DestroyMenu(users);
-            }
-            else if (lparam == WM_RBUTTONUP)
-            {
                 HMENU mpvYdl = CreatePopupMenu();
                 Assert(mpvYdl);
 
@@ -470,6 +479,15 @@ static LRESULT CALLBACK WindowProc(HWND window, UINT msg, WPARAM wparam, LPARAM 
                 AppendMenuW(menu, MF_POPUP, (UINT_PTR)settings, L"Settings");
 
                 AppendMenuW(menu, MF_STRING, CMD_EDIT_CONFIG_FILE, L"Modify user list");
+
+                if (gUserCount == 0)
+                {
+                    AppendMenuW(menu, MF_GRAYED, 0, L"No users found");
+                }
+                else
+                {
+                    AppendMenuW(menu, MF_POPUP, (UINT_PTR)users, L"Users");
+                }
 
                 AppendMenuW(menu, MF_SEPARATOR, 0, NULL);
                 AppendMenuW(menu, MF_STRING, CMD_QUIT, L"Exit");
@@ -509,9 +527,13 @@ static LRESULT CALLBACK WindowProc(HWND window, UINT msg, WPARAM wparam, LPARAM 
                 case CMD_QUIT:
                     DestroyWindow(window);
                     break;
+                default:
+                    OpenTwitchUser((cmd >> 8) - 1, cmd & 0xff);
+                    break;
                 }
 
                 DestroyMenu(menu);
+                DestroyMenu(users);
                 DestroyMenu(settings);
                 DestroyMenu(mpvYdl);
             }
