@@ -1,4 +1,5 @@
 *.exe
+*.dll
 *.pdb
 *.res
 *.obj
@@ -6,3 +7,4 @@
 .sublime
 release
 debug
+.vs

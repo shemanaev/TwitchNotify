@@ -31,6 +31,7 @@
 
 #include "jsmn.c"               // https://github.com/zserge/jsmn
 #include "jsmn_iterator.c"      // https://github.com/zserge/jsmn/pull/69
+#include "Toaster.h"
 
 #if defined(_MSC_VER)
 #  pragma warning(pop)
@@ -120,6 +121,7 @@ struct UserStatusOnline
     WCHAR user[MAX_USER_NAME_LENGTH];
     WCHAR game[MAX_GAME_NAME_LENGTH];
     WCHAR status[MAX_STATUS_LENGTH];
+    WCHAR icon_path[MAX_PATH];
     HICON icon;
     int video_height;
     int fps;
@@ -157,6 +159,8 @@ void* memset(void* dst, int value, size_t count)
 }
 #endif
 
+static ShowToastNotificationFunc ShowToastNotification = NULL;
+
 static void ShowNotification(LPWSTR message, LPWSTR title, DWORD flags, HICON icon)
 {
     NOTIFYICONDATAW data =
@@ -176,23 +180,24 @@ static void ShowNotification(LPWSTR message, LPWSTR title, DWORD flags, HICON ic
 
 static void ShowUserOnlineNotification(struct UserStatusOnline* status)
 {
-    WCHAR message[1024];
-    wnsprintfW(message, _countof(message), L"%s\n%s", status->status, status->game[0] == 0 ? L"unknown game" : status->game);
+    if (ShowToastNotification != NULL) {
+        ShowToastNotification(status->user, status->status, status->game, status->icon_path, 5);
+    }
+    else
+    {
+        WCHAR message[1024];
+        wnsprintfW(message, _countof(message), L"%s\n%s", status->status, status->game[0] == 0 ? L"unknown game" : status->game);
 
-    ShowNotification(message, status->user, NIIF_USER, status->icon ? status->icon : gTwitchNotifyIcon);
+        ShowNotification(message, status->user, NIIF_USER, status->icon ? status->icon : gTwitchNotifyIcon);
+    }
 }
 
-static void OpenTwitchUser(int index, int quality)
+static void OpenStream(LPCWSTR channel, int action, int quality)
 {
-    if (index < 0 || index >= gUserCount)
-    {
-        return;
-    }
-
     WCHAR args[400];
-    wnsprintfW(args, _countof(args), L"https://www.twitch.tv/%s", gUsers[index].name);
+    wnsprintfW(args, _countof(args), L"https://www.twitch.tv/%s", channel);
 
-    if (gUsers[index].online)
+    if (action == 0)
     {
         if (gUseLivestreamer)
         {
@@ -210,12 +215,22 @@ static void OpenTwitchUser(int index, int quality)
                 L"\"bestvideo[height<=160]+bestaudio/best[height<=160]\""
             };
             StrCatBuffW(args, L" --ytdl-format ", _countof(args));
-            StrCatBuffW(args, formats[quality == 0 ? gYdlFormat : quality - 1], _countof(args));
+            StrCatBuffW(args, formats[quality <= 0 ? gYdlFormat : quality - 1], _countof(args));
             ShellExecuteW(NULL, L"open", L"mpv.exe", args, NULL, SW_HIDE);
             return;
         }
     }
     ShellExecuteW(NULL, L"open", args, NULL, NULL, SW_SHOWNORMAL);
+}
+
+static void OpenTwitchUser(int index, int quality)
+{
+    if (index < 0 || index >= gUserCount)
+    {
+        return;
+    }
+
+    OpenStream(gUsers[index].name, gUsers[index].online ? 0 : 1, quality);
 }
 
 static void ToggleActive(HWND window)
@@ -894,6 +909,34 @@ static HICON DecodeIconAndSaveToCache(UINT64 hash, void* data, DWORD length)
     return icon;
 }
 
+static int GetOriginalUserIconPathFromCache(WCHAR* path, DWORD size, UINT64 hash)
+{
+    DWORD length = GetTempPathW(size, path);
+    if (length)
+    {
+        wnsprintfW(path + length, size - length, L"%016I64x.jpeg", hash);
+        return 1;
+    }
+    return 0;
+}
+
+static void SaveOriginalIconToCache(UINT64 hash, void* data, DWORD length)
+{
+    WCHAR path[MAX_PATH];
+    if (!GetOriginalUserIconPathFromCache(path, _countof(path), hash))
+    {
+        return;
+    }
+
+    HANDLE file = CreateFileW(path, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (file != INVALID_HANDLE_VALUE)
+    {
+        DWORD written;
+        WriteFile(file, data, length, &written, NULL);
+        CloseHandle(file);
+    }
+}
+
 static HICON LoadUserIconFromCache(UINT64 hash)
 {
     WCHAR path[MAX_PATH];
@@ -936,6 +979,7 @@ static HICON GetUserIcon(WCHAR* url, int urlLength, char* downloadBuffer)
     if (DownloadURL(url, NULL, downloadBuffer, &dataLength))
     {
         icon = DecodeIconAndSaveToCache(hash, downloadBuffer, dataLength);
+        SaveOriginalIconToCache(hash, downloadBuffer, dataLength);
     }
     return icon;
 }
@@ -1185,6 +1229,8 @@ static int UpdateUsers(void)
 
                         int urlLength = ConvertJsonStringToW(str, length, url, _countof(url));
                         status.icon = GetUserIcon(url, urlLength, data + MAX_DOWNLOAD_SIZE);
+                        UINT64 hash = GetFnv1Hash((BYTE*)url, urlLength * sizeof(WCHAR));
+                        GetOriginalUserIconPathFromCache(status.icon_path, _countof(status.icon_path), hash);
                     }
                     else if (jsoneq(data, id, "status") && value->type == JSMN_STRING)
                     {
@@ -1473,10 +1519,29 @@ static LONG WINAPI UnhandledException(LPEXCEPTION_POINTERS exceptionInfo)
     return EXCEPTION_EXECUTE_HANDLER;
 }
 
+static void ToastHandler(LPCWSTR channel, int action)
+{
+    OpenStream(channel, action, 0);
+}
+
+static void LoadToaster(void)
+{
+    HANDLE lib = LoadLibraryW(L"Toaster.dll");
+    if (lib == NULL) return;
+
+    IsToastsSupportedFunc IsToastsSupported = (IsToastsSupportedFunc) GetProcAddress(lib, "IsToastsSupported");
+    if (IsToastsSupported()) {
+        SetHandlerFunc SetHandler = (SetHandlerFunc) GetProcAddress(lib, "SetHandler");
+        SetHandler(ToastHandler);
+        ShowToastNotification = (ShowToastNotificationFunc) GetProcAddress(lib, "ShowToastNotification");
+    }
+}
 
 void WinMainCRTStartup(void)
 {
     SetUnhandledExceptionFilter(UnhandledException);
+
+    LoadToaster();
 
     WNDCLASSEXW wc =
     {
